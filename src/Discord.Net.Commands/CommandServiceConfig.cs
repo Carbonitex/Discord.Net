@@ -1,53 +1,62 @@
-﻿using System;
+using System.Collections.Generic;
 
 namespace Discord.Commands
 {
-    public class CommandServiceConfigBuilder
-    {
-        /// <summary> Gets or sets the prefix character used to trigger commands, if ActivationMode has the Char flag set. </summary>
-		public char? PrefixChar { get; set; } = null;
-        /// <summary> Gets or sets whether a message beginning with a mention to the logged-in user should be treated as a command. </summary>
-        public bool AllowMentionPrefix { get; set; } = true;
-        /// <summary> 
-        /// Gets or sets a custom function used to detect messages that should be treated as commands.
-        /// This function should a positive one indicating the index of where the in the message's RawText the command begins, 
-        /// and a negative value if the message should be ignored.
-        /// </summary>
-        public Func<Message, int> CustomPrefixHandler { get; set; } = null;
-        /// <summary>
-        /// Changing this to true makes the bot ignore all messages, except when the messages are from its own account.
-        /// This is desired behavior for "Self Bots" only, so unless this bot is being run under a normal user's account, leave it alone!!
-        /// </summary>
-        public bool IsSelfBot { get; set; } = false;
-
-        /// <summary> Gets or sets whether a help function should be automatically generated. </summary>
-		public HelpMode HelpMode { get; set; } = HelpMode.Disabled;
-
-
-        /// <summary> Gets or sets a handler that is called on any successful command execution. </summary>
-        public EventHandler<CommandEventArgs> ExecuteHandler { get; set; }
-        /// <summary> Gets or sets a handler that is called on any error during command parsing or execution. </summary>
-        public EventHandler<CommandErrorEventArgs> ErrorHandler { get; set; }
-
-        public CommandServiceConfig Build() => new CommandServiceConfig(this);
-    }
+    /// <summary>
+    ///     Represents a configuration class for <see cref="CommandService"/>.
+    /// </summary>
     public class CommandServiceConfig
     {
-        public char? PrefixChar { get; }
-        public bool AllowMentionPrefix { get; }
-        public Func<Message, int> CustomPrefixHandler { get; }
-        public bool IsSelfBot { get; }
+        /// <summary>
+        ///     Gets or sets the default <see cref="RunMode" /> commands should have, if one is not specified on the
+        ///     Command attribute or builder.
+        /// </summary>
+        public RunMode DefaultRunMode { get; set; } = RunMode.Sync;
 
-        /// <summary> Gets or sets whether a help function should be automatically generated. </summary>
-		public HelpMode HelpMode { get; set; } = HelpMode.Disabled;
+        /// <summary>
+        ///     Gets or sets the <see cref="char"/> that separates an argument with another.
+        /// </summary>
+        public char SeparatorChar { get; set; } = ' ';
+        
+        /// <summary>
+        ///     Gets or sets whether commands should be case-sensitive.
+        /// </summary>
+        public bool CaseSensitiveCommands { get; set; } = false;
 
-        internal CommandServiceConfig(CommandServiceConfigBuilder builder)
-        {
-            PrefixChar = builder.PrefixChar;
-            AllowMentionPrefix = builder.AllowMentionPrefix;
-            CustomPrefixHandler = builder.CustomPrefixHandler;
-            HelpMode = builder.HelpMode;
-            IsSelfBot = builder.IsSelfBot;
-        }
+        /// <summary>
+        ///     Gets or sets the minimum log level severity that will be sent to the <see cref="CommandService.Log"/> event.
+        /// </summary>
+        public LogSeverity LogLevel { get; set; } = LogSeverity.Info;
+
+        /// <summary>
+        ///     Gets or sets whether <see cref="RunMode.Sync"/> commands should push exceptions up to the caller.
+        /// </summary>
+        public bool ThrowOnError { get; set; } = true;
+
+        /// <summary>
+        /// Collection of aliases for matching pairs of string delimiters.
+        /// The dictionary stores the opening delimiter as a key, and the matching closing delimiter as the value.
+        /// If no value is supplied <see cref="QuotationAliasUtils.GetDefaultAliasMap"/> will be used, which contains
+        /// many regional equivalents.
+        /// Only values that are specified in this map will be used as string delimiters, so if " is removed then
+        /// it won't be used.
+        /// If this map is set to null or empty, the default delimiter of " will be used.
+        /// </summary>
+        /// <example>
+        /// <code language="cs">
+        /// QuotationMarkAliasMap = new Dictionary&lt;char, char%gt;()
+        /// {
+        ///     {'\"', '\"' },
+        ///     {'“', '”' },
+        ///     {'「', '」' },
+        /// }
+        /// </code>
+        /// </example>
+        public Dictionary<char, char> QuotationMarkAliasMap { get; set; } = QuotationAliasUtils.GetDefaultAliasMap;
+
+        /// <summary>
+        ///     Gets or sets a value that indicates whether extra parameters should be ignored.
+        /// </summary>
+        public bool IgnoreExtraArgs { get; set; } = false;
     }
 }

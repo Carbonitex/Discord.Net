@@ -1,188 +1,198 @@
-﻿using System.Collections.Generic;
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace Discord.Commands
 {
-	internal static class CommandParser
-	{
-		private enum ParserPart
-		{
-			None,
-			Parameter,
-			QuotedParameter,
-			DoubleQuotedParameter
-		}
+    internal static class CommandParser
+    {
+        private enum ParserPart
+        {
+            None,
+            Parameter,
+            QuotedParameter
+        }
+        public static async Task<ParseResult> ParseArgsAsync(CommandInfo command, ICommandContext context, bool ignoreExtraArgs, IServiceProvider services, string input, int startPos, IReadOnlyDictionary<char, char> aliasMap)
+        {
+            ParameterInfo curParam = null;
+            StringBuilder argBuilder = new StringBuilder(input.Length);
+            int endPos = input.Length;
+            var curPart = ParserPart.None;
+            int lastArgEndPos = int.MinValue;
+            var argList = ImmutableArray.CreateBuilder<TypeReaderResult>();
+            var paramList = ImmutableArray.CreateBuilder<TypeReaderResult>();
+            bool isEscaping = false;
+            char c, matchQuote = '\0';
 
-		public static bool ParseCommand(string input, CommandMap map, out IEnumerable<Command> commands, out int endPos)
-		{
-			int startPosition = 0;
-			int endPosition = 0;
-            int inputLength = input.Length;
-			bool isEscaped = false;
-			commands = null;
-			endPos = 0;
+            // local helper functions
+            bool IsOpenQuote(IReadOnlyDictionary<char, char> dict, char ch)
+            {
+                // return if the key is contained in the dictionary if it is populated
+                if (dict.Count != 0)
+                    return dict.ContainsKey(ch);
+                // or otherwise if it is the default double quote
+                return c == '\"';
+            }
 
-			if (input == "")
-				return false;
+            char GetMatch(IReadOnlyDictionary<char, char> dict, char ch)
+            {
+                // get the corresponding value for the key, if it exists
+                // and if the dictionary is populated
+                if (dict.Count != 0 && dict.TryGetValue(c, out var value))
+                    return value;
+                // or get the default pair of the default double quote
+                return '\"';
+            }
 
-			while (endPosition < inputLength)
-			{
-				char currentChar = input[endPosition++];
-				if (isEscaped)
-					isEscaped = false;
-				else if (currentChar == '\\')
-					isEscaped = true;
+            for (int curPos = startPos; curPos <= endPos; curPos++)
+            {
+                if (curPos < endPos)
+                    c = input[curPos];
+                else
+                    c = '\0';
 
-				bool isWhitespace = IsWhiteSpace(currentChar);
-                if ((!isEscaped && isWhitespace) || endPosition >= inputLength)
-				{
-					int length = (isWhitespace ? endPosition - 1 : endPosition) - startPosition;
-					string temp = input.Substring(startPosition, length);
-					if (temp == "")
-						startPosition = endPosition;
-					else
-					{
-						var newMap = map.GetItem(temp);
-						if (newMap != null)
-						{
-							map = newMap;
-							endPos = endPosition;
-                        }
-						else
-							break;
-						startPosition = endPosition;
-					}
-				}
-			}
-			commands = map.GetCommands(); //Work our way backwards to find a command that matches our input
-			return commands != null;
-		}
-		private static bool IsWhiteSpace(char c) => c == ' ' || c == '\n' || c == '\r' || c == '\t';
-
-		//TODO: Check support for escaping
-		public static CommandErrorType? ParseArgs(string input, int startPos, Command command, out string[] args)
-		{
-			ParserPart currentPart = ParserPart.None;
-			int startPosition = startPos;
-			int endPosition = startPos;
-			int inputLength = input.Length;
-			bool isEscaped = false;
-
-			var expectedArgs = command._parameters;
-			List<string> argList = new List<string>();
-			CommandParameter parameter = null;
-			
-			args = null;
-
-			if (input == "")
-				return CommandErrorType.InvalidInput;
-
-			while (endPosition < inputLength)
-			{
-				if (startPosition == endPosition && (parameter == null || parameter.Type != ParameterType.Multiple)) //Is first char of a new arg
-				{
-					if (argList.Count >= expectedArgs.Length)
-						return CommandErrorType.BadArgCount; //Too many args
-					parameter = expectedArgs[argList.Count];
-					if (parameter.Type == ParameterType.Unparsed)
-					{
-						argList.Add(input.Substring(startPosition));
-						break;
-					}
-				}
-
-                char currentChar = input[endPosition++];
-				if (isEscaped)
-					isEscaped = false;
-				else if (currentChar == '\\')
-					isEscaped = true;
-
-				bool isWhitespace = IsWhiteSpace(currentChar);
-				if (endPosition == startPosition + 1 && isWhitespace) //Has no text yet, and is another whitespace
-				{
-					startPosition = endPosition;
+                //If we're processing an remainder parameter, ignore all other logic
+                if (curParam != null && curParam.IsRemainder && curPos != endPos)
+                {
+                    argBuilder.Append(c);
                     continue;
-				}
+                }
 
-				switch (currentPart)
-				{
-					case ParserPart.None:
-						if ((!isEscaped && currentChar == '\"'))
-						{
-							currentPart = ParserPart.DoubleQuotedParameter;
-							startPosition = endPosition;
-						}
-						else if ((!isEscaped && currentChar == '\''))
-						{
-							currentPart = ParserPart.QuotedParameter;
-							startPosition = endPosition;
-						}
-						else if ((!isEscaped && isWhitespace) || endPosition >= inputLength)
-						{
-							int length = (isWhitespace ? endPosition - 1 : endPosition) - startPosition;
-                            if (length == 0)
-								startPosition = endPosition;
-							else
-                            {
-                                string temp = input.Substring(startPosition, length);
-                                argList.Add(temp);
-                                currentPart = ParserPart.None;
-								startPosition = endPosition;
-							}
-						} 
-						break;
-					case ParserPart.QuotedParameter:
-						if ((!isEscaped && currentChar == '\''))
-						{
-							string temp = input.Substring(startPosition, endPosition - startPosition - 1);
-							argList.Add(temp);
-                            currentPart = ParserPart.None;
-                            startPosition = endPosition;
-						}
-						else if (endPosition >= inputLength)
-							return CommandErrorType.InvalidInput;
-						break;
-					case ParserPart.DoubleQuotedParameter:
-						if ((!isEscaped && currentChar == '\"'))
-						{
-							string temp = input.Substring(startPosition, endPosition - startPosition - 1);
-							argList.Add(temp);
-                            currentPart = ParserPart.None;
-                            startPosition = endPosition;
-						}
-						else if (endPosition >= inputLength)
-							return CommandErrorType.InvalidInput;
-						break;
-				}
-			}
+                //If this character is escaped, skip it
+                if (isEscaping)
+                {
+                    if (curPos != endPos)
+                    {
+                        // if this character matches the quotation mark of the end of the string
+                        // means that it should be escaped
+                        // but if is not, then there is no reason to escape it then
+                        if (c != matchQuote)
+                        {
+                            // if no reason to escape the next character, then re-add \ to the arg
+                            argBuilder.Append('\\');
+                        }
 
-            //Unclosed quotes
-            if (currentPart == ParserPart.QuotedParameter || 
-                currentPart == ParserPart.DoubleQuotedParameter)
-                return CommandErrorType.InvalidInput;
+                        argBuilder.Append(c);
+                        isEscaping = false;
+                        continue;
+                    }
+                }
+                //Are we escaping the next character?
+                if (c == '\\' && (curParam == null || !curParam.IsRemainder))
+                {
+                    isEscaping = true;
+                    continue;
+                }
 
-            //Too few args
-            for (int i = argList.Count; i < expectedArgs.Length; i++)
-			{
-				var param = expectedArgs[i];
-				switch (param.Type)
-				{
-					case ParameterType.Required:
-						return CommandErrorType.BadArgCount;
-					case ParameterType.Optional:
-					case ParameterType.Unparsed:
-						argList.Add("");
-						break;
-				}
-			}
+                //If we're not currently processing one, are we starting the next argument yet?
+                if (curPart == ParserPart.None)
+                {
+                    if (char.IsWhiteSpace(c) || curPos == endPos)
+                        continue; //Skip whitespace between arguments
+                    else if (curPos == lastArgEndPos)
+                        return ParseResult.FromError(CommandError.ParseFailed, "There must be at least one character of whitespace between arguments.");
+                    else
+                    {
+                        if (curParam == null)
+                            curParam = command.Parameters.Count > argList.Count ? command.Parameters[argList.Count] : null;
 
-			/*if (argList.Count > expectedArgs.Length)
-			{
-				if (expectedArgs.Length == 0 || expectedArgs[expectedArgs.Length - 1].Type != ParameterType.Multiple)
-					return CommandErrorType.BadArgCount;
-            }*/
+                        if (curParam != null && curParam.IsRemainder)
+                        {
+                            argBuilder.Append(c);
+                            continue;
+                        }
 
-			args = argList.ToArray();
-			return null;
-		}
-	}
+                        if (IsOpenQuote(aliasMap, c))
+                        {
+                            curPart = ParserPart.QuotedParameter;
+                            matchQuote = GetMatch(aliasMap, c);
+                            continue;
+                        }
+                        curPart = ParserPart.Parameter;
+                    }
+                }
+
+                //Has this parameter ended yet?
+                string argString = null;
+                if (curPart == ParserPart.Parameter)
+                {
+                    if (curPos == endPos || char.IsWhiteSpace(c))
+                    {
+                        argString = argBuilder.ToString();
+                        lastArgEndPos = curPos;
+                    }
+                    else
+                        argBuilder.Append(c);
+                }
+                else if (curPart == ParserPart.QuotedParameter)
+                {
+                    if (c == matchQuote)
+                    {
+                        argString = argBuilder.ToString(); //Remove quotes
+                        lastArgEndPos = curPos + 1;
+                    }
+                    else
+                        argBuilder.Append(c);
+                }
+
+                if (argString != null)
+                {
+                    if (curParam == null)
+                    {
+                        if (command.IgnoreExtraArgs)
+                            break;
+                        else
+                            return ParseResult.FromError(CommandError.BadArgCount, "The input text has too many parameters.");
+                    }
+
+                    var typeReaderResult = await curParam.ParseAsync(context, argString, services).ConfigureAwait(false);
+                    if (!typeReaderResult.IsSuccess && typeReaderResult.Error != CommandError.MultipleMatches)
+                        return ParseResult.FromError(typeReaderResult, curParam);
+
+                    if (curParam.IsMultiple)
+                    {
+                        paramList.Add(typeReaderResult);
+
+                        curPart = ParserPart.None;
+                    }
+                    else
+                    {
+                        argList.Add(typeReaderResult);
+
+                        curParam = null;
+                        curPart = ParserPart.None;
+                    }
+                    argBuilder.Clear();
+                }
+            }
+
+            if (curParam != null && curParam.IsRemainder)
+            {
+                var typeReaderResult = await curParam.ParseAsync(context, argBuilder.ToString(), services).ConfigureAwait(false);
+                if (!typeReaderResult.IsSuccess)
+                    return ParseResult.FromError(typeReaderResult, curParam);
+                argList.Add(typeReaderResult);
+            }
+
+            if (isEscaping)
+                return ParseResult.FromError(CommandError.ParseFailed, "Input text may not end on an incomplete escape.");
+            if (curPart == ParserPart.QuotedParameter)
+                return ParseResult.FromError(CommandError.ParseFailed, "A quoted parameter is incomplete.");
+
+            //Add missing optionals
+            for (int i = argList.Count; i < command.Parameters.Count; i++)
+            {
+                var param = command.Parameters[i];
+                if (param.IsMultiple)
+                    continue;
+                if (!param.IsOptional)
+                    return ParseResult.FromError(CommandError.BadArgCount, "The input text has too few parameters.");
+                argList.Add(TypeReaderResult.FromSuccess(param.DefaultValue));
+            }
+
+            return ParseResult.FromSuccess(argList.ToImmutable(), paramList.ToImmutable());
+        }
+    }
 }
